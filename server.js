@@ -3,6 +3,11 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const geoip = require('geoip-lite');
+const {
+    getHeaders,
+    fetchBiliView,
+    fetchBiliPlayurl
+} = require('./bilibili-api');
 
 const app = express();
 
@@ -108,10 +113,7 @@ async function resolveB23ShortLink(shortUrl) {
         const response = await axios.get(url, {
             maxRedirects: 5,
             validateStatus: (status) => status < 400,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://www.bilibili.com/'
-            },
+            headers: getHeaders(),
             // 限制響應體大小，避免下載完整頁面
             maxContentLength: 1024 * 1024, // 1MB
             timeout: 5000 // 5秒超時
@@ -153,10 +155,7 @@ async function checkNodeAvailability(node, bvid) {
         
         const response = await axios.head(testUrl, { 
             timeout: 5000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://www.bilibili.com/'
-            }
+            headers: getHeaders()
         });
         
         return response.status === 200;
@@ -233,24 +232,19 @@ async function parseVideoWithRetry(bvid, maxRetries = 3) {
             const attemptStartTime = Date.now();
             console.log(`🔄 嘗試解析 (第 ${attempt}/${maxRetries} 次): ${bvid} | 開始時間: ${new Date().toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'})}`);
             
-            // 獲取影片資訊
-            const videoInfoResponse = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://www.bilibili.com/'
-                }
-            });
+            const videoInfoResponse = await fetchBiliView(bvid);
 
             if (videoInfoResponse.data.code === 0) {
                 const videoData = videoInfoResponse.data.data;
                 const cid = videoData.cid;
                 
-                // 嘗試獲取 1440P 流地址
-                const streamResponse = await axios.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=112&fnval=16&platform=html5`, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Referer': 'https://www.bilibili.com/'
-                    }
+                const streamResponse = await fetchBiliPlayurl({
+                    bvid,
+                    cid,
+                    qn: 112,
+                    fnval: 16,
+                    fnver: 0,
+                    platform: 'html5'
                 });
                 
                 if (streamResponse.data.code === 0) {
@@ -357,24 +351,19 @@ async function parseVideoWithRetryForNiche(bvid, maxRetries = 3) {
             const attemptStartTime = Date.now();
             console.log(`🔄 Niche 嘗試解析 (第 ${attempt}/${maxRetries} 次): ${bvid} | 開始時間: ${new Date().toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'})}`);
             
-            // 獲取影片資訊
-            const videoInfoResponse = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://www.bilibili.com/'
-                }
-            });
+            const videoInfoResponse = await fetchBiliView(bvid);
 
             if (videoInfoResponse.data.code === 0) {
                 const videoData = videoInfoResponse.data.data;
                 const cid = videoData.cid;
                 
-                // 嘗試獲取 1440P 流地址
-                const streamResponse = await axios.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=112&fnval=16&platform=html5`, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Referer': 'https://www.bilibili.com/'
-                    }
+                const streamResponse = await fetchBiliPlayurl({
+                    bvid,
+                    cid,
+                    qn: 112,
+                    fnval: 16,
+                    fnver: 0,
+                    platform: 'html5'
                 });
                 
                 if (streamResponse.data.code === 0) {
@@ -988,13 +977,8 @@ app.get('/api/parse/video/:bvid', async (req, res) => {
         console.log(`   瀏覽器: ${userAgent.substring(0, 50)}...`);
         console.log(`   語言: ${acceptLanguage.substring(0, 20)}... | 來源: ${referer.substring(0, 30)}...`);
         
-        // 獲取影片資訊
-        const videoInfoResponse = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://www.bilibili.com/'
-            }
-        });
+        // 獲取影片資訊（WBI 簽章，避免 -412）
+        const videoInfoResponse = await fetchBiliView(bvid);
         
         if (videoInfoResponse.data.code === 0) {
             const videoData = videoInfoResponse.data.data;
@@ -1008,49 +992,24 @@ app.get('/api/parse/video/:bvid', async (req, res) => {
             
             const streamPromises = qualityRequests.map(async (quality) => {
                 try {
-                    console.log(`正在獲取 ${quality.name} 流地址...`);                    
-                    // 嘗試多種方法獲取流地址
-                    const methods = [
-                        // 方法1：使用 platform=html5 繞過防盜鏈
-                        {
-                            url: `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${quality.qn}&fnval=16&platform=html5`,
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                                'Referer': 'https://www.bilibili.com/',
-                                'Accept': 'application/json, text/plain, */*',
-                                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                                'Accept-Encoding': 'gzip, deflate, br',
-                                'Connection': 'keep-alive',
-                                'Sec-Fetch-Dest': 'empty',
-                                'Sec-Fetch-Mode': 'cors',
-                                'Sec-Fetch-Site': 'same-site'
-                            }
-                        },
-                        // 方法2：標準請求
-                        {
-                            url: `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${quality.qn}&fnval=16`,
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                                'Referer': 'https://www.bilibili.com/',
-                                'Accept': 'application/json, text/plain, */*',
-                                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                                'Accept-Encoding': 'gzip, deflate, br',
-                                'Connection': 'keep-alive',
-                                'Sec-Fetch-Dest': 'empty',
-                                'Sec-Fetch-Mode': 'cors',
-                                'Sec-Fetch-Site': 'same-site'
-                            }
-                        }
+                    console.log(`正在獲取 ${quality.name} 流地址...`);
+                    const playurlMethods = [
+                        { platform: 'html5', extra: { platform: 'html5' } },
+                        { platform: '標準', extra: {} }
                     ];
-                    
+
                     let lastError = null;
-                    for (const method of methods) {
+                    for (const method of playurlMethods) {
                         try {
-                            const response = await axios.get(method.url, {
-                                headers: method.headers,
-                                timeout: 10000
+                            const response = await fetchBiliPlayurl({
+                                bvid,
+                                cid,
+                                qn: quality.qn,
+                                fnval: 16,
+                                fnver: 0,
+                                ...method.extra
                             });
-                            console.log(`${quality.name} 獲取成功 (方法: ${method.url.includes('platform=html5') ? 'html5' : '標準'})`);
+                            console.log(`${quality.name} 獲取成功 (方法: ${method.platform})`);
                             return { quality, response };
                         } catch (error) {
                             lastError = error;
@@ -1058,7 +1017,7 @@ app.get('/api/parse/video/:bvid', async (req, res) => {
                             continue;
                         }
                     }
-                    
+
                     throw lastError;
                 } catch (error) {
                     console.log(`獲取 ${quality.name} 失敗:`, error.response?.status, error.message);

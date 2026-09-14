@@ -66,6 +66,7 @@ https://vrcbilibili.xn--o8z.tw/niche/?url=https://www.bilibili.com/video/BV1xx41
 - **服務計數器**：實時統計服務使用情況
 - **多語言界面**：支援繁體中文、簡體中文、日文切換
 - **短連結支援**：自動解析 `b23.tv` 短連結為完整 Bilibili URL
+- **WBI 數位簽章**：查片與取流改走現行 Web API，並附帶 `wts` / `w_rid` 簽章，降低 412 風控攔截
 
 ## 文件結構
 
@@ -74,6 +75,7 @@ https://vrcbilibili.xn--o8z.tw/niche/?url=https://www.bilibili.com/video/BV1xx41
 ├── style.css           # 樣式文件
 ├── script.js           # JavaScript 功能
 ├── server.js           # Node.js 後端服務器
+├── bilibili-api.js     # Bilibili WBI 簽章與現行 API 呼叫
 ├── package.json        # 依賴配置
 ├── docker-compose.yml  # Docker 配置
 ├── Dockerfile          # Docker 映像配置
@@ -211,6 +213,7 @@ docker-compose up -d --build
 - **依賴管理**: npm + package.json
 - **容器化**: Docker + Docker Compose
 - **CDN 管理**: 智能節點選擇算法
+- **Bilibili API**: WBI 數位簽章 + `wbi/view` / `wbi/playurl` 現行路徑
 - **日誌系統**: 詳細的請求追蹤和監控
 
 ## 重要技術說明
@@ -273,6 +276,20 @@ docker-compose up -d --build
 3. 強制使用 `upos-sz-mirror08c.bilivideo.com` 節點
 4. 顯示 "栖隙居所適配" 備註
 5. 提供多種格式的流地址供選擇
+
+### 🔐 WBI 數位簽章與 API 路徑
+
+Bilibili 已將網頁查片改為需簽章的現行介面。舊的無簽章 `view` / `playurl` 直連容易回 `412`（`request was banned`）。
+
+本工具改為：
+
+1. 向 `/x/web-interface/nav` 取得當日 WBI 金鑰
+2. 以金鑰產生 `wts`、`w_rid` 數位簽章
+3. 查片走 `/x/web-interface/wbi/view`
+4. 取流走 `/x/player/wbi/playurl`
+5. 帶完整瀏覽器標頭與穩定 `buvid3` 匿名識別
+
+對外 API（`/api/parse/video/:bvid`、`/?url=`、`/niche/?url=`）路徑不變，僅後端對 Bilibili 的呼叫方式更新。
 
 ### 📊 日誌監控
 
@@ -341,6 +358,7 @@ GET /api/parse/video/:bvid?mirror=true
 - **服務統計**: 系統會統計服務使用次數，用於監控和分析
 - 部分影片可能受地區限制
 - 解析 API 可能隨時變更，請以實際情況為準
+- **風控回應**: 若日誌出現 `412` / `code: -412`，代表對 Bilibili 的請求被擋，不一定是影片失效
 - **本地測試**: 本地環境會顯示 `::1` IP，這是正常的
 - **節點選擇**: 系統會從三個節點中根據歷史成功率自動選擇最佳節點
 
@@ -349,6 +367,12 @@ GET /api/parse/video/:bvid?mirror=true
 本工具僅用於學習研究，請勿用於非法用途。使用本工具產生的一切後果由使用者自行承擔。
 
 ## 更新日誌
+
+### v1.11.0 (2026-09-14) — 新增數位簽章更新路徑
+- **WBI 數位簽章**: 查片與取流改為附帶 `wts` / `w_rid`，對齊現行網頁 API
+- **API 路徑更新**: 改走 `/x/web-interface/wbi/view` 與 `/x/player/wbi/playurl`，避免舊路徑 `412` 風控
+- **請求識別**: 使用完整 User-Agent、Origin，以及穩定 `buvid3`
+- **模組化**: 新增 `bilibili-api.js` 統一處理金鑰、簽章與 Bilibili 請求
 
 ### v1.10.0 (2026-02-13)
 - **短連結支援**: 新增 `b23.tv` 短連結自動解析功能
