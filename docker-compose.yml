@@ -11,6 +11,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DOMAIN=vrc-bili.mai.ne.jp
     volumes:
       - ./logs:/app/logs
     healthcheck:
